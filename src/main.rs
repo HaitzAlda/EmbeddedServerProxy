@@ -4,6 +4,7 @@ use http_types::{Request, Response, StatusCode, Url};
 use smol_potat::main;
 //use smol::prelude::*;
 use std::str::FromStr;
+use std::sync::Arc;
 
 #[main]
 async fn main() -> std::io::Result<()> {
@@ -11,11 +12,14 @@ async fn main() -> std::io::Result<()> {
     //Esperar a recibir cualquier conexión, y llamar a "server_connection"
     let listener = TcpListener::bind("0.0.0.0:8080").await?; // "?" para gestionar errores automaticamente
     println!("Proxy-a http://0.0.0.0:8080-n entzuten");
+    let cliente = Arc::new(surf::Client::new());
 
     loop {
         let (stream, _) = listener.accept().await?;
-        smol::spawn(async move {//Modu asinkronoan eskaera bakoitza kudeatu
-            if let Err(error) = server::accept(stream, server_connection).await {
+	let cliente_clone = cliente.clone();        
+
+	smol::spawn(async move {//Modu asinkronoan eskaera bakoitza kudeatu
+            if let Err(error) = server::accept(stream, move |req|  server_connection(req,cliente_clone.clone())).await {
                 eprintln!("Konexio errorea: {}", error);
             }
         })
@@ -24,7 +28,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 //Proxyak jasotako URI-a zerbitzariari bidali (Get bakarrik oraingoz)
-async fn server_connection(mut req: Request) -> http_types::Result<Response> {
+async fn server_connection(mut req: Request, cliente : Arc<surf::Client>) -> http_types::Result<Response> {
 	let server_helb = "http://127.0.0.1:8001"; //Helbide berria
 
 	//Uri berria formateatu "req"-en informazioarekin
@@ -43,7 +47,7 @@ async fn server_connection(mut req: Request) -> http_types::Result<Response> {
 	final_req.set_body(req.take_body());
 
 	//Uri berria  zerbitzariari pasa. Erantzuna itzuli main-era
-	match surf::client().send(final_req).await {
+	match cliente.send(final_req).await {
         	Ok(mut res) => {
             		let status = res.status();
             		let body = res.body_bytes().await.unwrap_or_default();
