@@ -4,7 +4,8 @@ use http_types::{Request, Response, StatusCode, Url};
 use smol_potat::main;
 //use smol::prelude::*;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread; 
 
 #[main]
 async fn main() -> std::io::Result<()> {
@@ -12,18 +13,20 @@ async fn main() -> std::io::Result<()> {
     //Esperar a recibir cualquier conexión, y llamar a "server_connection"
     let listener = TcpListener::bind("0.0.0.0:8080").await?; // "?" para gestionar errores automaticamente
     println!("Proxy-a http://0.0.0.0:8080-n entzuten");
-    let cliente = Arc::new(surf::Client::new());
 
+    let cliente = Arc::new(surf::Client::new());
+	let zirk_array = Arc::new(Mutex::new()); //Array Zirkularra sarrerak gordetzeko.
+	thread::spawn(konexio_aztertu());
     loop {
         let (stream, _) = listener.accept().await?;
-	let cliente_clone = cliente.clone();        
+		let cliente_clone = cliente.clone();        
 
-	smol::spawn(async move {//Modu asinkronoan eskaera bakoitza kudeatu
-            if let Err(error) = server::accept(stream, move |req|  server_connection(req,cliente_clone.clone())).await {
-                eprintln!("Konexio errorea: {}", error);
-            }
-        })
-        .detach(); //Konexioa emanda (edo ez) desekonektatu
+		smol::spawn(async move {//Modu asinkronoan eskaera bakoitza kudeatu
+				if let Err(error) = server::accept(stream, move |req|  server_connection(req,cliente_clone.clone())).await {
+					eprintln!("Konexio errorea: {}", error);
+				}
+		})
+		.detach(); //Konexioa emanda (edo ez) desekonektatu
     }
 }
 
@@ -62,4 +65,8 @@ async fn server_connection(mut req: Request, cliente : Arc<surf::Client>) -> htt
             		Ok(res)
         	}
     	}
+}
+
+fn konexio_aztertu{
+
 }
