@@ -1,0 +1,19 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+    ]
+    
+    "editor.tokenColorCustomizations": {
+    	"[Theme Name]": {
+    	    "textMateRules": [
+    	        {
+    	            "scope": "variable.other.rust",
+    	            "settings": {
+    	                "foreground": "#ffff00"
+    	            }
+        	}
+       	     ]
+         }
+}
+
+
