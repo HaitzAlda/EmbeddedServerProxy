@@ -1,11 +1,11 @@
-use async_h1::server;
-use async_net::TcpListener;
+use async_h1::{client,server};
+use async_net::{TcpListener, TcpStream}; //Crear una conexion TCP con alguien.
 use http_types::{Request, Response, StatusCode, Url};
 use smol_potat::main;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicIsize,Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread; 
+use std::{thread,io}; 
 
 const BUFFER_SZ: isize = 100;
 
@@ -21,13 +21,10 @@ struct Struct{
 #[main]
 async fn main() -> std::io::Result<()> {
 
-    //Esperar a recibir cualquier conexión, y llamar a "server_connection"
+    //Crea un listener que escuchará en el puerto 8080 para desepues crear conexiones con lo recibido
     let listener = TcpListener::bind("0.0.0.0:8080").await?; // "?" para gestionar errores automaticamente
     println!("Proxy-a http://0.0.0.0:8080-n entzuten");
 
-    let cliente = Arc::new(surf::Client::new());
-
-	
 	let zirk_array = Arc::new(
 			(0..BUFFER_SZ)
 				.map(|_| Mutex::new(Struct::default()))
@@ -39,11 +36,10 @@ async fn main() -> std::io::Result<()> {
 	//SUPONER QUE ESTO FUNCIONA ASI
 	let flag_clone = flag.clone();
 	let zirk_array_clone  = zirk_array.clone();
-	thread::spawn(move || konexio_aztertu(zirk_array_clone,flag_clone));
+	thread::spawn(move || konexio_aztertu(zirk_array_clone,flag_clone)); //Bigarren hari batek konexioaren informazioa aztertu
     
 	loop {
         let (stream, source_addr) = listener.accept().await?;
-		let cliente_clone = cliente.clone();
 		let zirk_array_clone = zirk_array.clone();
 		let flag_clone = flag.clone();
 		smol::spawn(async move {//Modu asinkronoan eskaera bakoitza kudeatu
@@ -55,10 +51,10 @@ async fn main() -> std::io::Result<()> {
 				if let Err(error) = server::accept(stream, move |req| {
 					let zirk_array_clone = zirk_array_clone.clone();
 					let flag_clone = flag_clone.clone();
-					let cliente_clone = cliente_clone.clone();
 					let source_ip = source_ip.clone();
 					async move {
 						
+						//Hemen egin bestela req-en kopia bat egin behar beste metodo batera pasatzeko
 						let method = req.method().to_string();
 						let headers = req.iter()
 							.map(|(name, values)| (name.to_string(), values.to_string()))
@@ -67,7 +63,7 @@ async fn main() -> std::io::Result<()> {
 						info_gehitu(zirk_array_clone, flag_clone, method, headers, source_ip, source_port, query);
 
 						// Continuar con el proxy hacia el servidor real
-						server_connection(req, cliente_clone).await
+						server_connection(req, Arc::new(())).await
 					}
 				}).await{
 					eprintln!("Konexio errorea: {}", error);
@@ -76,56 +72,56 @@ async fn main() -> std::io::Result<()> {
 	} //Konexioa emanda (edo ez) desekonektatu
 }
 
+async fn server_connection(mut req: Request, _cliente: Arc<()>) -> http_types::Result<Response> {
+    
+	let server_host = "127.0.0.1";
+    let server_port = 8001;
+    let server_addr = format!("{}:{}", server_host, server_port);
 
-//Proxyak jasotako URI-a zerbitzariari bidali (Get bakarrik oraingoz)
-async fn server_connection(mut req: Request, cliente : Arc<surf::Client>) -> http_types::Result<Response> {
-	let server_helb = "http://127.0.0.1:8001"; //Helbide berria
+    let mut url = format!("http://{}{}", server_addr, req.url().path());
 
-	//Uri berria formateatu "req"-en informazioarekin
-	let mut url = format!("{}{}", server_helb, req.url().path()).to_string();
-
-	if let Some(query) = req.url().query() { //Comprobar que req.url.query existe
-		
-		url.push('?');
-		url.push_str(query);
-	}
-
-	let url_parse = Url::from_str(&url)?; //Parsear el url
-
-	let mut final_req = Request::new(req.method(), url_parse);
-
-for (name, values) in req.iter() {
-    if name.as_str().eq_ignore_ascii_case("host") {
-        continue;
+    if let Some(query) = req.url().query() {
+        url.push('?');
+        url.push_str(query);
     }
-    if name.as_str().eq_ignore_ascii_case("accept-encoding") {
-        continue; // Skip forwarding this header
+
+    let url_parsed = Url::from_str(&url)?;
+
+   *req.url_mut() = url_parsed;
+   req.insert_header("Host", format!("{}:{}", server_host, server_port));
+
+
+   let stream = TcpStream::connect(&server_addr).await.map_err(|e| {
+       eprintln!("Connection to server failed: {}", e);
+       io::Error::new(io::ErrorKind::Other, "Failed to connect to upstream server")
+   })?;
+
+
+   match client::connect(stream, req).await {
+        Ok(mut response) => {
+            // Clone headers and body correctly
+			let body_bytes = response.body_bytes().await.unwrap_or_default();
+            let mut final_response = Response::new(response.status());
+
+            // Copy all headers
+            for (name, value) in response.iter() {
+                final_response.insert_header(name, value);
+            }
+
+            // Copy body
+			
+            final_response.set_body(body_bytes.clone());
+			final_response.insert_header("Content-Length", body_bytes.len().to_string());
+
+            Ok(final_response)
+        }
+        Err(err) => {
+            eprintln!("Error sending request to upstream server: {}", err);
+            let mut err_response = Response::new(StatusCode::BadGateway);
+            err_response.set_body("Proxy forwarding error");
+            Ok(err_response)
+        }
     }
-    final_req.insert_header(name, values);
-}
-final_req.insert_header("Host", "localhost:8001");
-
-
-	//if req.method() != http_types::Method::Get {
-    final_req.set_body(req.take_body());
-//}
-
-	//Uri berria  zerbitzariari pasa. Erantzuna itzuli main-era
-	match cliente.send(final_req).await {
-        	Ok(mut res) => {
-            		let status = res.status();
-            		let body = res.body_bytes().await.unwrap_or_default();
-            		let mut response = Response::new(status);
-            		response.set_body(body);
-            		Ok(response)
-        	}
-        	Err(error) => {
-            		eprintln!("Proxy errorea: {}", error);
-            		let mut res = Response::new(StatusCode::BadGateway);
-            		res.set_body("Pakete berbidalketa errorea");
-            		Ok(res)
-        	}
-    	}
 }
 
 fn info_gehitu(zirk_array : Arc<Vec<Mutex<Struct>>>, flag : Arc<AtomicIsize>, method: String, headers : Vec<(String, String)>, source_ip : String, source_port : u16, query : String){
