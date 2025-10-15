@@ -1,18 +1,45 @@
-use async_h1::{client,server};
-use async_net::{TcpListener};
+use tokio::net::UdpSocket;
+use tokio::io::TcpListener;
+use std::io;
+
+/*DEJALO TODO LIMPIO*/
+async fn TcpHandler() {
+
+}
+
+async fn UdpHandler(){
+
+}
+
+#[tokio:main]
+async fn main()-> io::Result<()>{
+
+   /*TODO: Preparar los dos sockets para escuchar. 
+   Cuando se reciva una conexion en ambos casos guardarlos en la funcion de analizar en el otro hilo
+   Cada vez que uno reciva una conexion spawnear una llamada asincrona a su funcion respectiva y que esa se encargue de gestionarlo
+   */   
 
 
-#[main]
-async fn  main() -> std::io::Result<()> {
+   let listenerTCP = TcpListener::bind("0.0.0.0:8080").await?;
+   let listenerUDP = UdpSocket::bind("0.0.0.0:8080").await?; //Checkear que esto funciona asi y no hay que hacer nada mas
 
-   let listener = TcpListener::bind{"0.0.0.0:8080"}.await?;
-   println!("Proxy-a http://0.0.0.0:8080-n entzuten.");
-   //Main loop, koxeio berriak aztertzeko prest egon. Behin bat jasota, modu asinkronoan aztertu eta honek iteratu beste konxeioak aztertzeko
+   println!("TCP eta UDP entzuten\n");
+
+   
+   tokio::spawn(async move {
+      if let Err(e) = UdpHandler().await { //TODO
+         eprintln!("UDP konexioak errorea eman du: {}", e);
+      }
+   });
+
    loop{
-    let (stream, addr) = listener.accept().await?;
-
-    smol::spawn(async move {
-        
-    })
+      let (stream, source_addr) = listenerTCP.accept().await?;
+      println!("TCP konexio berria\n");
+      tokio::spawn(async move{
+         if let Err(e) = TcpHandler().await{ //TODO
+            eprintln!("TCP konexioak errorea eman du: {}", e);
+         }
+      });
    }
+
 }
