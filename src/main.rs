@@ -1,25 +1,26 @@
-use tokio::net::UdpSocket;
-use tokio::io::TcpListener;
-use std::io;
-use std::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream,UdpSocket};
+use tokio::io;
+use tokio::io::Result;
 
 /*DEJALO TODO LIMPIO*/
-async fn TcpHandler(mut inStream : stream, source_addr : addr) {
+async fn TcpHandler(mut inStream : TcpStream) -> Result<()>{
 
    let mut outStream = TcpStream::connect("127.0.0.1:8001").await?;
-   match tokio::io::copy_bidirectional(&mut inStream, &mut outStream).await {
-      OK((_read, _write)) => Ok(()),
-      Err(e) => Err(e),
-   }
+
+   tokio::io::copy_bidirectional(&mut inStream, &mut outStream).await?;
+   Ok(())
 }
 
-async fn UdpHandler(mut sock : UdpSocket){
+async fn UdpHandler(mut sock : UdpSocket) -> Result<()>{
+
+   let mut buf = [0u8; 2048];
 
    let backed_socket = UdpSocket::bind("0.0.0.0:0").await?;
+   backed_socket.connect("127.0.0.1:8001").await?;
+
    loop {
       let (len, addr) = sock.recv_from(&mut buf).await?;
-
-      backed_socket.connect("127.0.0.1:8001").await?;
+      
       backed_socket.send(&buf[..len]).await?;
 
       let n = backed_socket.recv(&mut buf).await?;
@@ -28,7 +29,7 @@ async fn UdpHandler(mut sock : UdpSocket){
 
 }
 
-#[tokio:main]
+#[tokio::main]
 async fn main()-> io::Result<()>{
 
    /*TODO: Preparar los dos sockets para escuchar. 
@@ -50,9 +51,9 @@ async fn main()-> io::Result<()>{
 
    loop{
       let (stream, source_addr) = listenerTCP.accept().await?;
-      println!("TCP konexio berria\n");
+      println!("TCP konexio berria: {}\n", source_addr);
       tokio::spawn(async move{
-         if let Err(e) = TcpHandler(stream, source_addr).await{
+         if let Err(e) = TcpHandler(stream).await{
             eprintln!("TCP konexioak errorea eman du: {}", e);
          }
       });
