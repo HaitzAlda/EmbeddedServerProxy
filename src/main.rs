@@ -1,15 +1,18 @@
+use pnet::packet;
 use tokio::net::{TcpListener, TcpStream,UdpSocket};
 use tokio::io;
 use tokio::io::Result;
+use std::println;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize};
 use tokio::sync::Mutex;
-
+use pcap;
 /*DEJALO TODO LIMPIO*/
 /*TODO:
 
 */
 const BUFFER_SZ: usize = 100;
+//const INTERFAZ
 
 //REVISAR  LOS TIPOS
 #[derive(Debug,Default,Clone,Copy)]
@@ -80,6 +83,38 @@ async fn UdpHandler(mut sock : UdpSocket, array: Arc<Mutex<[Struct; BUFFER_SZ]>>
 
 }
 
+async fn packetCapture(){
+ tokio::task::spawn_blocking(|| {
+        let mut cap = pcap::Capture::from_device("lo")
+            .unwrap()
+            .promisc(false)
+            .snaplen(65535)
+            .timeout(1000)
+            .open()
+            .unwrap();
+
+        cap.filter("tcp port 8080", true).unwrap();
+
+        loop {
+            match cap.next_packet() {
+                Ok(packet) => {
+                    println!(
+                        "Packet received: {} bytes",
+                        packet.header.len
+                    );
+                }
+                Err(pcap::Error::TimeoutExpired) => continue,
+                Err(e) => {
+                    eprintln!("Capture error: {}", e);
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::main]
 async fn main()-> io::Result<()>{
 
@@ -94,11 +129,12 @@ async fn main()-> io::Result<()>{
 
    let listenerTCP = TcpListener::bind("0.0.0.0:8080").await?;
    let listenerUDP = UdpSocket::bind("0.0.0.0:8080").await?; //Checkear que esto funciona asi y no hay que hacer nada mas
-
+  
    println!("TCP eta UDP entzuten\n");
 
    tokio::spawn(UdpHandler(listenerUDP, array.clone(), last_pos.clone()));
-
+   tokio::spawn(packetCapture());
+   
    loop{
       let (stream, source_addr) = listenerTCP.accept().await?;
       println!("TCP konexio berria: {}\n", source_addr);
